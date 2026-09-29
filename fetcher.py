@@ -174,8 +174,8 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
             
             entries_to_process = [(e, r) for e in feed.entries if is_within_24_hours(getattr(e, 'published', 'Unknown Date'))]
             
-            # Process in parallel
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            # Process in parallel (10 workers for fast link decoding & storage)
+            with ThreadPoolExecutor(max_workers=10) as executor:
                 results = list(executor.map(process_entry, entries_to_process))
                 
             for art in results:

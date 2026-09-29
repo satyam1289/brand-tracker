@@ -278,12 +278,23 @@ def get_user_articles_sheet(user_email: str = None):
         w.append_row(["title", "link", "published_at", "source", "company_name", "region"])
     return w
 
+import time
+_sheet_rows_cache = {}
+
 def add_article(company_id: int, title: str, link: str, published_at: str, source: str, summary: str = None, sentiment: str = None, extraction_method: str = 'summary', user_email: str = '', company_name: str = 'Event Feed', region: str = 'Global'):
     try:
         w_art = get_user_articles_sheet(user_email)
-        rows = w_art.get_all_values()
+        sheet_title = w_art.title
+        now = time.time()
         
-        # Check for duplicate links or titles inside the user's sheet (Column 1 is title, Column 2 is link)
+        # Fast in-memory row caching to prevent 60+ repeated HTTP calls to Google Sheets API
+        if sheet_title in _sheet_rows_cache and (now - _sheet_rows_cache[sheet_title]['time'] < 15):
+            rows = _sheet_rows_cache[sheet_title]['rows']
+        else:
+            rows = w_art.get_all_values()
+            _sheet_rows_cache[sheet_title] = {'time': now, 'rows': rows}
+        
+        # Check for duplicate links or titles inside the user's sheet
         norm_link = link.strip().lower()
         norm_title = title.strip().lower()
         
@@ -294,14 +305,19 @@ def add_article(company_id: int, title: str, link: str, published_at: str, sourc
                 if db_link == norm_link or db_title == norm_title:
                     return False
                 
-        w_art.append_row([
+        new_row = [
             title,
             link,
             published_at,
             source,
             company_name,
             region
-        ])
+        ]
+        w_art.append_row(new_row)
+        
+        # Immediately append to in-memory cache so subsequent items in batch don't duplicate
+        rows.append(new_row)
+        _sheet_rows_cache[sheet_title] = {'time': time.time(), 'rows': rows}
         return True
     except Exception as e:
         print(f"Error adding article to user sheet: {e}")

@@ -166,16 +166,11 @@ with st.sidebar:
                         
                         if (distance < 0) {{
                             clearInterval(x);
-                            countdownEl.innerHTML = "WAITING...";
-                            countdownEl.style.color = "#FFCA28";
-                            
-                            if (sessionStorage.getItem('last_timer_reload') !== nextFetch.toString()) {{
-                                sessionStorage.setItem('last_timer_reload', nextFetch.toString());
-                                setTimeout(function() {{ 
-                                    try {{ window.location.reload(); }} catch(e) {{}}
-                                    try {{ window.parent.location.reload(); }} catch(e) {{}}
-                                 }}, 5000);
-                            }}
+                            countdownEl.innerHTML = "REFRESHING...";
+                            countdownEl.style.color = "#00E676";
+                            setTimeout(function() {{ 
+                                window.location.reload(); 
+                            }}, 2000);
                         }} else {{
                             var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
                             var seconds = Math.floor((distance % (1000 * 60)) / 1000);
