@@ -121,17 +121,17 @@ def init_db():
         w = sh.worksheet("Companies")
         w.append_row(["id", "name", "region", "last_status", "user_email"])
         
-    # 2. Verify/Create 'Articles' worksheet (Support 5 columns for user-scoping)
+    # 2. Verify/Create 'Articles' worksheet (Support 6 columns for region)
     try:
         w_art = sh.worksheet("Articles")
-        if w_art.col_count < 5:
-            w_art.resize(rows=w_art.row_count, cols=5)
-            w_art.update_cell(1, 5, "user_email")
-            print("Upgraded Articles worksheet with user_email column.")
+        if w_art.col_count < 6:
+            w_art.resize(rows=w_art.row_count, cols=6)
+            w_art.update_cell(1, 6, "region")
+            print("Upgraded Articles worksheet with region column.")
     except gspread.exceptions.WorksheetNotFound:
-        sh.add_worksheet(title="Articles", rows="2000", cols="5")
+        sh.add_worksheet(title="Articles", rows="2000", cols="6")
         w = sh.worksheet("Articles")
-        w.append_row(["title", "link", "published_at", "source", "user_email"])
+        w.append_row(["title", "link", "published_at", "source", "company_name", "region"])
 
         
     # 3. Verify/Create 'Status' worksheet
@@ -234,24 +234,51 @@ def update_company_status(company_id: int, status: str):
         
         for idx, row in enumerate(rows):
             if idx > 0 and row[0].isdigit() and int(row[0]) == company_id:
+                # Do not overwrite if company is manually paused by user
+                current_status = row[3] if len(row) > 3 else ""
+                if "paused" in current_status.lower():
+                    return
                 w.update_cell(idx + 1, 4, status)
                 break
     except Exception as e:
         print(f"Error updating company status: {e}")
+
+def toggle_company_pause(company_id: int, user_email: str = ''):
+    try:
+        sh = get_gsheet()
+        w = sh.worksheet("Companies")
+        rows = w.get_all_values()
+        
+        for idx, row in enumerate(rows):
+            if idx > 0 and row[0].isdigit() and int(row[0]) == company_id:
+                row_email = row[4].strip() if len(row) > 4 else ""
+                if not user_email or row_email.lower() == user_email.lower():
+                    current_status = row[3] if len(row) > 3 else ""
+                    new_status = "Active" if "paused" in current_status.lower() else "Paused"
+                    w.update_cell(idx + 1, 4, new_status)
+                    return new_status
+        return None
+    except Exception as e:
+        print(f"Error toggling company pause: {e}")
+        return None
 
 def get_user_articles_sheet(user_email: str = None):
     sh = get_gsheet()
     sheet_name = user_email.strip() if user_email and user_email.strip() else "Articles"
     try:
         w = sh.worksheet(sheet_name)
+        if w.col_count < 6:
+            w.resize(rows=w.row_count, cols=6)
+            w.update_cell(1, 6, "region")
+            print(f"Upgraded sheet '{sheet_name}' with region column.")
     except gspread.exceptions.WorksheetNotFound:
         # Create a new sheet for the specific user
-        sh.add_worksheet(title=sheet_name, rows="2000", cols="5")
+        sh.add_worksheet(title=sheet_name, rows="2000", cols="6")
         w = sh.worksheet(sheet_name)
-        w.append_row(["title", "link", "published_at", "source", "company_name"])
+        w.append_row(["title", "link", "published_at", "source", "company_name", "region"])
     return w
 
-def add_article(company_id: int, title: str, link: str, published_at: str, source: str, summary: str = None, sentiment: str = None, extraction_method: str = 'summary', user_email: str = '', company_name: str = 'Event Feed'):
+def add_article(company_id: int, title: str, link: str, published_at: str, source: str, summary: str = None, sentiment: str = None, extraction_method: str = 'summary', user_email: str = '', company_name: str = 'Event Feed', region: str = 'Global'):
     try:
         w_art = get_user_articles_sheet(user_email)
         rows = w_art.get_all_values()
@@ -272,7 +299,8 @@ def add_article(company_id: int, title: str, link: str, published_at: str, sourc
             link,
             published_at,
             source,
-            company_name
+            company_name,
+            region
         ])
         return True
     except Exception as e:
@@ -292,14 +320,16 @@ def get_recent_articles(limit=50, user_email: str = None):
             if len(row) < 4:
                 row = row + [""] * (4 - len(row))
             
-            comp_name = row[4].strip() if len(row) > 4 else "Event Feed"
+            comp_name = row[4].strip() if len(row) > 4 and row[4].strip() else "Event Feed"
+            region_val = row[5].strip() if len(row) > 5 and row[5].strip() else "Global"
 
             articles.append({
                 "title": row[0],
                 "link": row[1],
                 "published_at": row[2],
                 "source": row[3],
-                "company_name": comp_name
+                "company_name": comp_name,
+                "region": region_val
             })
             if len(articles) >= limit:
                 break
@@ -320,8 +350,9 @@ def get_articles_for_brand(company_name, user_email: str = None):
             if len(row) < 4:
                 row = row + [""] * (4 - len(row))
                 
-            comp_name = row[4].strip() if len(row) > 4 else "Event Feed"
-            if company_name and comp_name.lower() != company_name.lower():
+            comp_name = row[4].strip() if len(row) > 4 and row[4].strip() else "Event Feed"
+            region_val = row[5].strip() if len(row) > 5 and row[5].strip() else "Global"
+            if company_name and comp_name.lower() != comp_name.lower():
                 continue
 
             articles.append({
@@ -329,7 +360,8 @@ def get_articles_for_brand(company_name, user_email: str = None):
                 "link": row[1],
                 "published_at": row[2],
                 "source": row[3],
-                "company_name": comp_name
+                "company_name": comp_name,
+                "region": region_val
             })
         return articles
     except Exception as e:

@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning)
-from database import init_db, add_company, remove_company, get_all_companies, get_recent_articles, get_last_fetch_time, set_last_fetch_time, is_paused, set_paused, delete_article
+from database import init_db, add_company, remove_company, get_all_companies, get_recent_articles, get_last_fetch_time, set_last_fetch_time, is_paused, set_paused, delete_article, toggle_company_pause
 from scheduler import init_scheduler
 from fetcher import fetch_all_companies
 from notifier import send_notification
@@ -79,12 +79,24 @@ with st.sidebar:
         st.info("No companies tracked right now. Add some above.")
     else:
         for comp in companies:
-            with st.expander(f"🏢 {comp['name']} ({comp.get('region', 'Global')})"):
-                st.write(f"**Status:** {comp.get('last_status', 'N/A')}")
-                if st.button("Remove", key=f"remove_{comp['id']}", type="secondary", use_container_width=True):
-                    remove_company(comp['name'], user_email)
-                    st.cache_data.clear() # Clear cache on new write
-                    st.rerun()
+            c_status = comp.get('last_status', 'N/A')
+            is_comp_paused = "paused" in c_status.lower()
+            status_icon = "⏸️ Paused" if is_comp_paused else "🟢 Active"
+            
+            with st.expander(f"🏢 {comp['name']} ({comp.get('region', 'Global')}) - {status_icon}"):
+                st.write(f"**Status:** {c_status}")
+                col1, col2 = st.columns(2)
+                with col1:
+                    pause_btn_label = "▶️ Resume" if is_comp_paused else "⏸️ Pause"
+                    if st.button(pause_btn_label, key=f"pause_{comp['id']}", use_container_width=True):
+                        toggle_company_pause(comp['id'], user_email)
+                        st.cache_data.clear()
+                        st.rerun()
+                with col2:
+                    if st.button("🗑️ Remove", key=f"remove_{comp['id']}", type="secondary", use_container_width=True):
+                        remove_company(comp['name'], user_email)
+                        st.cache_data.clear()
+                        st.rerun()
     st.markdown("---")
     st.subheader("Fetch Status")
     
@@ -221,9 +233,11 @@ with st.sidebar:
     if all_articles:
         report_df = pd.DataFrame(all_articles)
         
-        # Format report columns: URL, Title, Agency, Time of Publishing
-        export_df = report_df[['link', 'title', 'source', 'published_at']].copy()
-        export_df.columns = ['URL', 'Title', 'Agency', 'Time of Publishing']
+        # Format report columns: URL, Title, Agency, Time of Publishing, Region
+        if 'region' not in report_df.columns:
+            report_df['region'] = 'Global'
+        export_df = report_df[['link', 'title', 'source', 'published_at', 'region']].copy()
+        export_df.columns = ['URL', 'Title', 'Agency', 'Time of Publishing', 'Region']
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:

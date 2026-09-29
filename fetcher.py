@@ -46,7 +46,8 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
-    def process_entry(entry):
+    def process_entry(args):
+        entry, current_region = args if isinstance(args, tuple) else (args, 'Global')
         title = getattr(entry, 'title', 'No Title')
         link = getattr(entry, 'link', '')
         published_at = getattr(entry, 'published', 'Unknown Date')
@@ -132,7 +133,7 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
             except Exception as e:
                 logger.error(f"Error using gnewsdecoder: {e}")
         
-        # 2. Add to Google Sheets database (no summary/sentiment/extraction_method columns needed)
+        # 2. Add to Google Sheets database (with region column)
         if final_url:
             is_new = add_article(
                 company_id=company_id,
@@ -141,21 +142,28 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
                 published_at=published_at,
                 source=source,
                 user_email=user_email,
-                company_name=company_name
+                company_name=company_name,
+                region=current_region
             )
             if is_new:
-                logger.info(f"New article found & saved: {title}")
+                logger.info(f"New article found & saved ({current_region}): {title}")
                 return {
                     'title': title, 
                     'link': final_url, 
                     'published_at': published_at,
                     'source': source, 
-                    'company_name': company_name
+                    'company_name': company_name,
+                    'region': current_region
                 }
         return None
 
     for r in regions_to_fetch:
-        encoded_query = urllib.parse.quote(company_name)
+        query_term = company_name
+        comp_clean = company_name.lower().replace(" ", "").replace("-", "")
+        if "oister" in comp_clean:
+            query_term = 'Oister Global OR OisterGlobal OR Oister'
+            
+        encoded_query = urllib.parse.quote(query_term)
         suffix = "&gl=IN&ceid=IN:en" if r == 'India' else ""
         rss_url = BASE_RSS_URL.format(query=encoded_query, suffix=suffix)
         
@@ -164,7 +172,7 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
             response.raise_for_status()
             feed = feedparser.parse(response.content)
             
-            entries_to_process = [e for e in feed.entries if is_within_24_hours(getattr(e, 'published', 'Unknown Date'))]
+            entries_to_process = [(e, r) for e in feed.entries if is_within_24_hours(getattr(e, 'published', 'Unknown Date'))]
             
             # Process in parallel
             with ThreadPoolExecutor(max_workers=4) as executor:
@@ -205,6 +213,9 @@ def fetch_all_companies():
     set_last_fetch_time(session_start_utc.isoformat())
 
     def fetch_comp(comp):
+        if "paused" in comp.get("last_status", "").lower():
+            logger.info(f"Company '{comp['name']}' is paused. Skipping.")
+            return []
         return fetch_rss_for_company(comp['name'], comp['id'], comp.get('region', 'Global'), sync_time=session_start_utc, user_email=comp.get('user_email', ''))
 
     with ThreadPoolExecutor(max_workers=2) as executor:
